@@ -117,7 +117,7 @@ def run_wan_generate(model_name, params):
     
     # Build command exactly as in official docs
     cmd = [
-        "python", "/workspace/Wan2.2/generate.py",
+        "python3", "/workspace/Wan2.2/generate.py",
         "--task", model_name,
         "--size", params["size"],
         "--ckpt_dir", str(config["path"]),
