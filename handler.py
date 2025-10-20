@@ -1,228 +1,265 @@
 """
 RunPod Serverless Handler for Wan 2.2 Official Models
-Supports T2V, I2V, TI2V generation
+100% Compatible with Official Wan 2.2 GitHub Implementation
+Supports: TI2V-5B (T2V + I2V), T2V-A14B, I2V-A14B
+
+Official Repo: https://github.com/Wan-Video/Wan2.2
 """
 
 import runpod
-import torch
 import os
 import sys
 import base64
+import subprocess
 import tempfile
+import json
 from pathlib import Path
 
-# Add Wan2.2 to path
-sys.path.insert(0, '/workspace/Wan2.2')
+# Model paths
+MODELS_DIR = Path("/workspace")  # Models stored here
 
-# Import Wan modules
-from wan.pipelines.pipeline_wan import WanPipeline
-from wan.models.transformers import Wan2Model
-from wan.utils.utils import save_video
-
-# Global model cache
-MODEL_CACHE = {}
-MODELS_DIR = Path("/runpod-volume")  # RunPod network volume
-
-def download_models_if_needed():
-    """Download models to network volume if not present"""
-    # Check which models are available
-    models_to_check = {
-        "t2v": MODELS_DIR / "Wan2.2-T2V-A14B",
-        "i2v": MODELS_DIR / "Wan2.2-I2V-A14B",
-        "ti2v": MODELS_DIR / "Wan2.2-TI2V-5B"
+# Model configurations from official docs
+MODEL_CONFIGS = {
+    "ti2v-5B": {
+        "path": MODELS_DIR / "Wan2.2-TI2V-5B",
+        "default_size": "1280*704",  # IMPORTANT: TI2V uses 704 height, not 720!
+        "alt_size": "704*1280",
+        "supports_t2v": True,
+        "supports_i2v": True,
+        "vram": "24GB",
+        "command": "python /workspace/Wan2.2/generate.py"
+    },
+    "t2v-A14B": {
+        "path": MODELS_DIR / "Wan2.2-T2V-A14B",
+        "default_size": "1280*720",
+        "alt_size": "854*480",
+        "supports_t2v": True,
+        "supports_i2v": False,
+        "vram": "80GB",
+        "command": "python /workspace/Wan2.2/generate.py"
+    },
+    "i2v-A14B": {
+        "path": MODELS_DIR / "Wan2.2-I2V-A14B",
+        "default_size": "1280*720",
+        "alt_size": "854*480",
+        "supports_t2v": False,
+        "supports_i2v": True,
+        "vram": "80GB",
+        "command": "python /workspace/Wan2.2/generate.py"
     }
-    
-    available = {}
-    for task, path in models_to_check.items():
-        if path.exists():
-            print(f"✅ {task.upper()} model found at {path}")
-            available[task] = str(path)
-        else:
-            print(f"⚠️ {task.upper()} model not found at {path}")
-    
-    return available
+}
 
-def load_model(task, model_path):
-    """Load Wan model"""
-    cache_key = f"{task}_{model_path}"
+def check_wan_installation():
+    """Verify Wan 2.2 is installed"""
+    wan_path = Path("/workspace/Wan2.2")
+    generate_script = wan_path / "generate.py"
     
-    if cache_key in MODEL_CACHE:
-        print(f"📦 Using cached {task.upper()} model")
-        return MODEL_CACHE[cache_key]
+    if not wan_path.exists():
+        print("⚠️ Wan 2.2 not found at /workspace/Wan2.2")
+        print("📥 Cloning Wan 2.2 repository...")
+        subprocess.run([
+            "git", "clone", 
+            "https://github.com/Wan-Video/Wan2.2.git",
+            str(wan_path)
+        ], check=True)
+        
+        print("📦 Installing dependencies...")
+        subprocess.run([
+            "pip", "install", "-r", 
+            str(wan_path / "requirements.txt")
+        ], check=True)
     
-    print(f"🔄 Loading {task.upper()} model from {model_path}...")
+    return generate_script.exists()
+
+def download_model_if_needed(model_name):
+    """Download model if not present"""
+    config = MODEL_CONFIGS.get(model_name)
+    if not config:
+        raise ValueError(f"Unknown model: {model_name}")
     
-    try:
-        # Load model based on task
-        if task == "ti2v":
-            # TI2V-5B model
-            model = WanPipeline.from_pretrained(
-                model_path,
-                torch_dtype=torch.float16,
-                variant="fp16"
-            )
-        else:
-            # T2V or I2V A14B models
-            model = WanPipeline.from_pretrained(
-                model_path,
-                torch_dtype=torch.float16
-            )
-        
-        model = model.to("cuda")
-        MODEL_CACHE[cache_key] = model
-        
-        print(f"✅ {task.upper()} model loaded successfully")
-        return model
-        
-    except Exception as e:
-        print(f"❌ Failed to load {task.upper()} model: {e}")
-        raise
+    model_path = config["path"]
+    
+    if model_path.exists():
+        print(f"✅ Model found: {model_path}")
+        return True
+    
+    print(f"📥 Downloading {model_name}...")
+    
+    # Convert model name to HuggingFace format
+    hf_name = f"Wan-AI/Wan2.2-{model_name.upper()}"
+    
+    subprocess.run([
+        "huggingface-cli", "download",
+        hf_name,
+        "--local-dir", str(model_path)
+    ], check=True)
+    
+    print(f"✅ Model downloaded: {model_path}")
+    return True
+
+def save_temp_image(image_base64):
+    """Save base64 image to temp file"""
+    if "base64," in image_base64:
+        image_base64 = image_base64.split("base64,")[1]
+    
+    image_bytes = base64.b64decode(image_base64)
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg", mode='wb') as f:
+        f.write(image_bytes)
+        return f.name
+
+def run_wan_generate(model_name, params):
+    """
+    Run official Wan 2.2 generate.py script
+    This ensures 100% compatibility with official implementation
+    """
+    config = MODEL_CONFIGS[model_name]
+    
+    # Build command exactly as in official docs
+    cmd = [
+        "python", "/workspace/Wan2.2/generate.py",
+        "--task", model_name,
+        "--size", params["size"],
+        "--ckpt_dir", str(config["path"]),
+        "--offload_model", "True",
+        "--convert_model_dtype"
+    ]
+    
+    # Add TI2V-specific flag
+    if model_name == "ti2v-5B":
+        cmd.extend(["--t5_cpu"])
+    
+    # Add prompt
+    if params.get("prompt"):
+        cmd.extend(["--prompt", params["prompt"]])
+    
+    # Add image if provided (for I2V or TI2V)
+    if params.get("image_path"):
+        cmd.extend(["--image", params["image_path"]])
+    
+    # Add seed if provided
+    if params.get("seed"):
+        cmd.extend(["--seed", str(params["seed"])])
+    
+    print(f"🎬 Running command: {' '.join(cmd)}")
+    
+    # Run generation
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        cwd="/workspace/Wan2.2"
+    )
+    
+    if result.returncode != 0:
+        print(f"❌ Generation failed: {result.stderr}")
+        raise Exception(f"Generation failed: {result.stderr}")
+    
+    print(f"✅ Generation completed")
+    print(result.stdout)
+    
+    # Find output video (Wan saves to outputs/ directory)
+    output_dir = Path("/workspace/Wan2.2/outputs")
+    
+    # Find most recent video file
+    video_files = sorted(output_dir.glob("*.mp4"), key=lambda x: x.stat().st_mtime, reverse=True)
+    
+    if not video_files:
+        raise Exception("No output video found")
+    
+    return video_files[0]
 
 def generate_video(job):
-    """Main generation function"""
+    """
+    Main handler - Routes to correct Wan 2.2 model
+    """
     job_input = job["input"]
     
-    # Get task type
-    task = job_input.get("task", "ti2v")  # t2v, i2v, ti2v
-    prompt = job_input.get("prompt", "")
-    
-    # Image input (for i2v, ti2v)
-    image_base64 = job_input.get("image_base64")
-    image_url = job_input.get("image_url")
-    
-    # Parameters
-    width = job_input.get("width", 1280)
-    height = job_input.get("height", 720 if task != "ti2v" else 704)
-    num_frames = job_input.get("num_frames", 121)  # ~5 seconds at 24fps
-    num_inference_steps = job_input.get("steps", 50)
-    guidance_scale = job_input.get("guidance_scale", 7.5)
-    seed = job_input.get("seed", None)
-    
-    print(f"🎬 Starting {task.upper()} generation...")
-    print(f"📝 Prompt: {prompt}")
-    print(f"📏 Resolution: {width}x{height}, Frames: {num_frames}")
-    
     try:
-        # Get available models
-        available_models = download_models_if_needed()
+        # Check Wan installation
+        if not check_wan_installation():
+            raise Exception("Wan 2.2 installation failed")
         
-        if task not in available_models:
-            raise ValueError(f"{task.upper()} model not available. Please upload model to /runpod-volume/Wan2.2-{task.upper()}-*")
+        # Parse input
+        model_name = job_input.get("model", "ti2v-5B")  # Default to TI2V-5B
+        prompt = job_input.get("prompt", "")
+        image_base64 = job_input.get("image_base64")
         
-        # Load model
-        model_path = available_models[task]
-        pipeline = load_model(task, model_path)
+        # Validate model
+        if model_name not in MODEL_CONFIGS:
+            raise ValueError(f"Unknown model: {model_name}. Available: {list(MODEL_CONFIGS.keys())}")
         
-        # Prepare inputs
-        generator = torch.Generator("cuda").manual_seed(seed) if seed else None
+        config = MODEL_CONFIGS[model_name]
         
-        # Handle image input
-        image = None
-        if task in ["i2v", "ti2v"] and (image_base64 or image_url):
-            if image_base64:
-                # Decode base64 image
-                if "base64," in image_base64:
-                    image_base64 = image_base64.split("base64,")[1]
-                
-                image_bytes = base64.b64decode(image_base64)
-                
-                # Save to temp file
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as f:
-                    f.write(image_bytes)
-                    image_path = f.name
-                
-                from PIL import Image as PILImage
-                image = PILImage.open(image_path)
-                
-            elif image_url:
-                # Download image from URL
-                import requests
-                from PIL import Image as PILImage
-                from io import BytesIO
-                
-                response = requests.get(image_url)
-                image = PILImage.open(BytesIO(response.content))
+        # Download model if needed
+        download_model_if_needed(model_name)
         
-        # Generate video
-        print("🎥 Generating video...")
+        # Determine task mode
+        has_image = bool(image_base64)
+        is_t2v = not has_image
+        is_i2v = has_image
         
-        if task == "t2v":
-            # Text-to-Video
-            output = pipeline(
-                prompt=prompt,
-                height=height,
-                width=width,
-                num_frames=num_frames,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                generator=generator
-            )
+        # Validate task compatibility
+        if is_t2v and not config["supports_t2v"]:
+            raise ValueError(f"{model_name} does not support text-to-video")
         
-        elif task == "i2v":
-            # Image-to-Video
-            if image is None:
-                raise ValueError("Image required for I2V task")
-            
-            output = pipeline(
-                prompt=prompt,
-                image=image,
-                height=height,
-                width=width,
-                num_frames=num_frames,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                generator=generator
-            )
+        if is_i2v and not config["supports_i2v"]:
+            raise ValueError(f"{model_name} does not support image-to-video")
         
-        elif task == "ti2v":
-            # Text+Image-to-Video (hybrid)
-            output = pipeline(
-                prompt=prompt,
-                image=image,  # Can be None for text-only
-                height=height,
-                width=width,
-                num_frames=num_frames,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                generator=generator
-            )
+        # Prepare parameters
+        params = {
+            "size": job_input.get("size", config["default_size"]),
+            "prompt": prompt if prompt else None,
+            "seed": job_input.get("seed")
+        }
         
-        # Get video frames
-        video_frames = output.frames[0]  # [num_frames, H, W, C]
+        # Save image to temp file if provided
+        if image_base64:
+            params["image_path"] = save_temp_image(image_base64)
         
-        # Save video to temp file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as f:
-            output_path = f.name
+        print(f"🎯 Model: {model_name}")
+        print(f"📝 Mode: {'Text-to-Video' if is_t2v else 'Image-to-Video'}")
+        print(f"📏 Size: {params['size']}")
+        print(f"💬 Prompt: {params.get('prompt', 'None')[:50]}...")
         
-        save_video(video_frames, output_path, fps=24)
+        # Run generation using official script
+        output_video_path = run_wan_generate(model_name, params)
         
-        # Convert to base64
-        with open(output_path, "rb") as f:
+        # Convert video to base64
+        with open(output_video_path, "rb") as f:
             video_bytes = f.read()
             video_base64 = base64.b64encode(video_bytes).decode('utf-8')
         
         # Cleanup
-        os.unlink(output_path)
-        if image and image_path:
-            os.unlink(image_path)
+        if params.get("image_path"):
+            os.unlink(params["image_path"])
         
-        print("✅ Video generated successfully")
+        os.unlink(output_video_path)
+        
+        print("✅ Video generation successful")
         
         return {
+            "status": "success",
             "video": f"data:video/mp4;base64,{video_base64}",
             "info": {
-                "task": task,
-                "resolution": f"{width}x{height}",
-                "frames": num_frames,
+                "model": model_name,
+                "mode": "t2v" if is_t2v else "i2v",
+                "size": params["size"],
+                "prompt": params.get("prompt", ""),
                 "fps": 24
             }
         }
         
     except Exception as e:
-        print(f"❌ Generation failed: {e}")
+        print(f"❌ Error: {e}")
         import traceback
         traceback.print_exc()
-        return {"error": str(e)}
+        
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
 
-# RunPod handler
+# Start RunPod handler
 runpod.serverless.start({"handler": generate_video})
