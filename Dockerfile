@@ -27,6 +27,9 @@ RUN pip3 install --no-cache-dir packaging ninja
 # Install Wan requirements
 RUN pip3 install --no-cache-dir -r requirements.txt
 
+# Install additional required dependencies (decord for video processing)
+RUN pip3 install --no-cache-dir decord av
+
 # Install RunPod
 RUN pip3 install runpod
 
