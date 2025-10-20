@@ -21,6 +21,9 @@ WORKDIR /workspace/Wan2.2
 # Install PyTorch with CUDA 12.1
 RUN pip3 install --no-cache-dir torch>=2.4.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
+# Install packaging first (required by flash_attn)
+RUN pip3 install --no-cache-dir packaging ninja
+
 # Install Wan requirements
 RUN pip3 install --no-cache-dir -r requirements.txt
 
