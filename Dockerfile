@@ -1,6 +1,6 @@
 FROM nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04
 
-# Install Python 3.10
+# Install Python 3.10 and system dependencies
 RUN apt-get update && apt-get install -y \
     python3.10 \
     python3-pip \
@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     libgl1-mesa-glx \
     libglib2.0-0 \
+    libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -27,8 +28,8 @@ RUN pip3 install --no-cache-dir packaging ninja
 # Install Wan requirements
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Install additional required dependencies (decord for video processing)
-RUN pip3 install --no-cache-dir decord av
+# Install additional required dependencies (decord for video processing, librosa for audio)
+RUN pip3 install --no-cache-dir decord av librosa soundfile
 
 # Install RunPod
 RUN pip3 install runpod
