@@ -28,11 +28,18 @@ RUN pip3 install --no-cache-dir packaging ninja
 # Install Wan base requirements
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Install S2V (Speech-to-Video) requirements if file exists
-RUN pip3 install --no-cache-dir -r requirements_s2v.txt || echo "requirements_s2v.txt not found, skipping"
-
-# Install Animate requirements if file exists
-RUN pip3 install --no-cache-dir -r requirements_animate.txt || echo "requirements_animate.txt not found, skipping"
+# Install all additional dependencies needed by Wan2.2 modules
+# (requirements_s2v.txt and requirements_animate.txt may not exist in repo)
+RUN pip3 install --no-cache-dir \
+    peft \
+    librosa \
+    decord \
+    openai-whisper \
+    onnxruntime \
+    pyworld \
+    modelscope \
+    loguru \
+    sentencepiece
 
 # Install RunPod
 RUN pip3 install runpod
