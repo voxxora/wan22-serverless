@@ -25,11 +25,39 @@ RUN pip3 install --no-cache-dir torch>=2.4.0 torchvision torchaudio --index-url 
 # Install packaging first (required by flash_attn)
 RUN pip3 install --no-cache-dir packaging ninja
 
-# Install ALL Wan requirements (base + s2v + animate)
-# The codebase imports all modules on startup even if not used
-RUN pip3 install --no-cache-dir -r requirements.txt && \
-    pip3 install --no-cache-dir -r requirements_s2v.txt && \
-    pip3 install --no-cache-dir -r requirements_animate.txt
+# Install Wan base requirements
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Install additional dependencies for all Wan2.2 modules
+# These are needed because the codebase imports all modules on startup
+RUN pip3 install --no-cache-dir \
+    decord \
+    av \
+    librosa \
+    soundfile \
+    psutil \
+    moviepy \
+    peft \
+    onnxruntime \
+    pandas \
+    matplotlib \
+    loguru \
+    sentencepiece \
+    openai-whisper \
+    HyperPyYAML \
+    inflect \
+    wetext \
+    omegaconf \
+    conformer \
+    hydra-core \
+    lightning \
+    rich \
+    gdown \
+    wget \
+    pyarrow \
+    pyworld \
+    modelscope \
+    GitPython
 
 # Install RunPod
 RUN pip3 install runpod
