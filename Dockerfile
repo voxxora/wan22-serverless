@@ -25,11 +25,11 @@ RUN pip3 install --no-cache-dir torch>=2.4.0 torchvision torchaudio --index-url 
 # Install packaging first (required by flash_attn)
 RUN pip3 install --no-cache-dir packaging ninja
 
-# Install Wan requirements
-RUN pip3 install --no-cache-dir -r requirements.txt
-
-# Install additional required dependencies (decord for video processing, librosa for audio)
-RUN pip3 install --no-cache-dir decord av librosa soundfile
+# Install ALL Wan requirements (base + s2v + animate)
+# The codebase imports all modules on startup even if not used
+RUN pip3 install --no-cache-dir -r requirements.txt && \
+    pip3 install --no-cache-dir -r requirements_s2v.txt && \
+    pip3 install --no-cache-dir -r requirements_animate.txt
 
 # Install RunPod
 RUN pip3 install runpod
