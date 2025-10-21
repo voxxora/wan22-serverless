@@ -44,6 +44,11 @@ RUN pip3 install --no-cache-dir \
 # Install RunPod
 RUN pip3 install runpod
 
+# Pre-download TI2V-5B model (20GB, takes 30 mins during BUILD)
+RUN pip3 install huggingface-hub && \
+    huggingface-cli download Wan-AI/Wan2.2-TI2V-5B \
+    --local-dir /workspace/Wan2.2-TI2V-5B
+
 # Copy handler
 COPY handler.py /workspace/handler.py
 
